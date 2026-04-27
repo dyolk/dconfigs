@@ -8,10 +8,15 @@ data:
     global:
       scrape_interval: 15s
       evaluation_interval: 15s
+
     scrape_configs:
+      # 监控 Prometheus 自身
       - job_name: 'prometheus'
         static_configs:
           - targets: ['localhost:9090']
+
+      # 原有 job：抓取 node_exporter 指标（如果您的节点部署了 node_exporter 且端口为 9100）
+      # 如果不需要 node_exporter 指标，可以删除或注释掉整个 job
       - job_name: 'kubernetes-nodes'
         scheme: http
         kubernetes_sd_configs:
@@ -22,5 +27,29 @@ data:
             replacement: '${1}:9100'
             target_label: __address__
             action: replace
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+
+      # 新增 job：抓取 kubelet 的 cAdvisor 指标（容器 CPU/内存使用数据）
+      - job_name: 'kubernetes-nodes-cadvisor'
+        scheme: https
+        metrics_path: /metrics/cadvisor
+        tls_config:
+          insecure_skip_verify: true          # 跳过 kubelet 自签名证书验证
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          # 将节点地址的端口保持为 10250（kubelet 默认端口）
+          - source_labels: [__address__]
+            regex: '(.*):10250'
+            replacement: '${1}:10250'
+            target_label: __address__
+          # 添加 node 标签，值为节点名称
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: '(.+)'
+            target_label: node
+            replacement: '${1}'
+          # 保留所有节点原始标签
           - action: labelmap
             regex: __meta_kubernetes_node_label_(.+)
