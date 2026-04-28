@@ -1,0 +1,83 @@
+
+1. 创建证书配置文件
+
+cat > /tmp/apiserver-kubelet-client.cnf <<'EOF'
+[ req ]
+distinguished_name = dn
+req_extensions = v3_req
+prompt = no
+
+[ dn ]
+CN = kube-apiserver-kubelet-client
+O = system:masters
+
+[ v3_req ]
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+EOF
+
+
+2. 生成私钥
+
+openssl genrsa -out /etc/kubernetes/pki/apiserver-kubelet-client.key 4096
+
+chmod 600 /etc/kubernetes/pki/apiserver-kubelet-client.key
+
+
+3. 生成 CSR
+
+openssl req -new \
+  -key /etc/kubernetes/pki/apiserver-kubelet-client.key \
+  -out /tmp/apiserver-kubelet-client.csr \
+  -config /tmp/apiserver-kubelet-client.cnf
+
+
+4. 使用集群 CA 签发证书
+
+openssl x509 -req \
+  -in /tmp/apiserver-kubelet-client.csr \
+  -CA /etc/kubernetes/pki/k8s-ca.crt \
+  -CAkey /etc/kubernetes/pki/k8s-ca.key \
+  -CAcreateserial \
+  -out /etc/kubernetes/pki/apiserver-kubelet-client.crt \
+  -days 3650 \
+  -extensions v3_req \
+  -extfile /tmp/apiserver-kubelet-client.cnf
+
+chmod 644 /etc/kubernetes/pki/apiserver-kubelet-client.crt
+
+
+5. 同步证书到其他 master 节点
+
+
+二、配置 apiserver
+
+在每台 master 节点上修改 apiserver.service 实际引用的 KUBE_API_ARGS。
+
+追加以下参数：
+
+--kubelet-client-certificate=/etc/kubernetes/pki/apiserver-kubelet-client.crt \
+--kubelet-client-key=/etc/kubernetes/pki/apiserver-kubelet-client.key
+
+systemctl restart apiserver
+
+
+三、配置 kubelet
+
+/etc/kubernetes/kubelet/config.yaml
+
+关键配置如下：
+
+authentication:
+  anonymous:
+    enabled: false
+  x509:
+    clientCAFile: /etc/kubernetes/pki/k8s-ca.crt
+  webhook:
+    enabled: true
+authorization:
+  mode: Webhook
+
+
+systemctl restart kubelet
+
